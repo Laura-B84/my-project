@@ -56,5 +56,5 @@ jobs:
             Новых отзывов: ${{ steps.collect.outputs.new_total }}
             Из них негативных (≤3★): ${{ steps.collect.outputs.new_negative }}
 
-            Сайт: https://laura-b84.github.io/my-project/
-            Репозиторий: https://github.com/Laura-B84/my-project
+            Полная таблица — во вложении.
+          attachments: otzyvy_halyk.xlsx
