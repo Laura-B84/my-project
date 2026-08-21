@@ -48,7 +48,7 @@ jobs:
           username: ${{ secrets.MAIL_USERNAME }}
           password: ${{ secrets.MAIL_PASSWORD }}
           from: Halyk Отзывы <${{ secrets.MAIL_USERNAME }}>
-          to: maxim.mova@gmail.com
+          to: maksimm3@halykbank.kz
           subject: "Halyk отзывы — обновление ${{ steps.collect.outputs.new_total }} новых"
           body: |
             Автосбор отзывов Halyk Kazakhstan завершён.
