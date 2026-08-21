@@ -14,6 +14,7 @@
 
 import hashlib
 import logging
+import os
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -247,6 +248,12 @@ def main():
 
     if new_negative > 0:
         notify_negative(new_negative)
+
+    # Публикует итоги для шага отправки письма в GitHub Actions (см. workflow).
+    gh_output = os.environ.get("GITHUB_OUTPUT")
+    if gh_output:
+        with open(gh_output, "a", encoding="utf-8") as f:
+            f.write(f"new_total={new_total}\nnew_negative={new_negative}\n")
 
 
 if __name__ == "__main__":

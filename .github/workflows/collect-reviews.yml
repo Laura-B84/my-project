@@ -22,6 +22,7 @@ jobs:
         run: pip install -r requirements.txt
 
       - name: Collect reviews
+        id: collect
         run: python collect_reviews.py
 
       - name: Regenerate Pages
@@ -38,3 +39,22 @@ jobs:
             git commit -m "Auto-update reviews $(date -u +'%Y-%m-%d %H:%M UTC')"
             git push
           fi
+
+      - name: Send update email
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: smtp.gmail.com
+          server_port: 465
+          username: ${{ secrets.MAIL_USERNAME }}
+          password: ${{ secrets.MAIL_PASSWORD }}
+          from: Halyk Отзывы <${{ secrets.MAIL_USERNAME }}>
+          to: maxim.mova@gmail.com
+          subject: "Halyk отзывы — обновление ${{ steps.collect.outputs.new_total }} новых"
+          body: |
+            Автосбор отзывов Halyk Kazakhstan завершён.
+
+            Новых отзывов: ${{ steps.collect.outputs.new_total }}
+            Из них негативных (≤3★): ${{ steps.collect.outputs.new_negative }}
+
+            Сайт: https://laura-b84.github.io/my-project/
+            Репозиторий: https://github.com/Laura-B84/my-project
