@@ -1,0 +1,40 @@
+name: Collect reviews
+
+on:
+  schedule:
+    - cron: "0 4 * * *"  # 09:00 Asia/Almaty (UTC+5), не зависит от компьютера пользователя
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+jobs:
+  collect:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Collect reviews
+        run: python collect_reviews.py
+
+      - name: Regenerate Pages
+        run: python generate_page.py
+
+      - name: Commit and push if changed
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add otzyvy_halyk.xlsx docs/index.html
+          if git diff --cached --quiet; then
+            echo "No new reviews"
+          else
+            git commit -m "Auto-update reviews $(date -u +'%Y-%m-%d %H:%M UTC')"
+            git push
+          fi
