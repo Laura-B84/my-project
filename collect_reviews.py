@@ -8,7 +8,8 @@
 - Google Play: публичный парсинг через google-play-scraper (без ключей).
 - Дедупликация: App Store — по ID отзыва; Google Play — по хэшу
   автор+дата+текст (публичная страница не отдаёт стабильный ID).
-- Дописывает только новые строки в otzyvy_halyk.xlsx, ничего не перезаписывает.
+- Ничего не теряет: новые отзывы добавляются к уже сохранённым, но лист
+  каждый раз пересобирается заново в порядке от новых отзывов к старым.
 - При появлении новых отзывов с рейтингом ≤3★ показывает Windows toast.
 """
 
@@ -187,19 +188,32 @@ def load_seen_ids(ws):
     return app_store_ids, gp_hashes
 
 
-def append_review_row(ws, store, item):
+def build_row(store, item):
     rating = item.get("rating")
     is_negative = rating is not None and rating <= 3
-    ws.append([
+    row = [
         item.get("date"), store, item.get("country"), rating,
         item.get("title", ""), item.get("text", ""), item.get("author", ""),
         item.get("version", ""), item["id"], "да" if is_negative else "нет",
-    ])
-    if is_negative:
-        last_row = ws.max_row
-        for col in range(1, len(HEADERS) + 1):
-            ws.cell(row=last_row, column=col).fill = NEGATIVE_FILL
-    return is_negative
+    ]
+    return row, is_negative
+
+
+def write_sorted_rows(ws, rows):
+    """Полностью перезаписывает данные листа (кроме шапки), отсортированные
+    от новых отзывов к старым сверху вниз."""
+    date_idx = HEADERS.index("Дата отзыва")
+    rows.sort(key=lambda r: r[date_idx] or datetime.min, reverse=True)
+
+    if ws.max_row > 1:
+        ws.delete_rows(2, ws.max_row - 1)
+
+    for row in rows:
+        ws.append(row)
+        if row[HEADERS.index("Негативный")] == "да":
+            last_row = ws.max_row
+            for col in range(1, len(HEADERS) + 1):
+                ws.cell(row=last_row, column=col).fill = NEGATIVE_FILL
 
 
 def notify_negative(count):
@@ -220,6 +234,8 @@ def main():
     wb, ws = load_or_create_workbook()
     seen_app_ids, seen_gp_hashes = load_seen_ids(ws)
 
+    all_rows = [list(row) for row in ws.iter_rows(min_row=2, values_only=True) if row and row[0] is not None]
+
     new_total = 0
     new_negative = 0
 
@@ -228,7 +244,9 @@ def main():
             for item in fetch_app_store_reviews(country, seen_app_ids):
                 seen_app_ids.add(item["id"])
                 new_total += 1
-                if append_review_row(ws, "App Store", item):
+                row, is_negative = build_row("App Store", item)
+                all_rows.append(row)
+                if is_negative:
                     new_negative += 1
         except Exception:
             logging.exception("App Store %s: сбор не удался", country)
@@ -238,11 +256,14 @@ def main():
             for item in fetch_google_play_reviews(country, seen_gp_hashes):
                 seen_gp_hashes.add(item["id"])
                 new_total += 1
-                if append_review_row(ws, "Google Play", item):
+                row, is_negative = build_row("Google Play", item)
+                all_rows.append(row)
+                if is_negative:
                     new_negative += 1
         except Exception:
             logging.exception("Google Play %s: сбор не удался", country)
 
+    write_sorted_rows(ws, all_rows)
     wb.save(OUTPUT_FILE)
     logging.info("Готово. Новых отзывов: %s, из них негативных: %s", new_total, new_negative)
 
