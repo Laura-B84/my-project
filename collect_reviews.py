@@ -66,6 +66,10 @@ COUNTRIES = ["kz"]
 # последние N отзывов по каждому источнику при первом запуске.
 REVIEW_LIMIT = 30
 
+# Хранить в файле только отзывы за последние N дней — более старые
+# записи удаляются при каждом запуске.
+RETENTION_DAYS = 30
+
 logging.basicConfig(
     filename=LOG_FILE,
     level=logging.INFO,
@@ -423,6 +427,12 @@ def main():
         except Exception:
             logging.exception("Google Play %s: сбор не удался", country)
 
+    retention_cutoff = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=RETENTION_DAYS)
+    before = len(android_rows) + len(apple_rows)
+    android_rows = [r for r in android_rows if r[DATE_IDX] is None or r[DATE_IDX] >= retention_cutoff]
+    apple_rows = [r for r in apple_rows if r[DATE_IDX] is None or r[DATE_IDX] >= retention_cutoff]
+    removed = before - len(android_rows) - len(apple_rows)
+
     if not is_new_layout(ws):
         for merged_range in list(ws.merged_cells.ranges):
             ws.unmerge_cells(str(merged_range))
@@ -431,7 +441,10 @@ def main():
 
     write_side_by_side(ws, android_rows, apple_rows)
     wb.save(OUTPUT_FILE)
-    logging.info("Готово. Новых отзывов: %s, из них негативных: %s", new_total, new_negative)
+    logging.info(
+        "Готово. Новых отзывов: %s, из них негативных: %s. Удалено старше %s дней: %s",
+        new_total, new_negative, RETENTION_DAYS, removed,
+    )
 
     if new_negative > 0:
         notify_negative(new_negative)
