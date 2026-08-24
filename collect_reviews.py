@@ -18,12 +18,13 @@ import logging
 import os
 import time
 from datetime import datetime, timezone
+from itertools import groupby
 from pathlib import Path
 
 import requests
 from google_play_scraper import Sort, reviews as gp_reviews
 from openpyxl import Workbook, load_workbook
-from openpyxl.styles import PatternFill
+from openpyxl.styles import Font, PatternFill
 
 BASE_DIR = Path(__file__).resolve().parent
 OUTPUT_FILE = BASE_DIR / "otzyvy_halyk.xlsx"
@@ -199,21 +200,87 @@ def build_row(store, item):
     return row, is_negative
 
 
-def write_sorted_rows(ws, rows):
-    """Полностью перезаписывает данные листа (кроме шапки), отсортированные
-    от новых отзывов к старым сверху вниз."""
+DATE_BLOCK_FILL = PatternFill(start_color="D9E1F2", end_color="D9E1F2", fill_type="solid")
+DATE_BLOCK_FONT = Font(bold=True, size=12)
+STORE_BLOCK_FILL = PatternFill(start_color="F2F2F2", end_color="F2F2F2", fill_type="solid")
+STORE_BLOCK_FONT = Font(bold=True, italic=True)
+SECTION_FILL = PatternFill(start_color="FFE699", end_color="FFE699", fill_type="solid")
+SECTION_FONT = Font(bold=True, size=13)
+ARCHIVE_FILL = PatternFill(start_color="E2EFDA", end_color="E2EFDA", fill_type="solid")
+
+RECENT_DAYS = 5
+STORE_ORDER = ("App Store", "Google Play")
+
+
+def _merged_banner_row(ws, text, fill, font):
+    ws.append([text] + [None] * (len(HEADERS) - 1))
+    r = ws.max_row
+    ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=len(HEADERS))
+    cell = ws.cell(row=r, column=1)
+    cell.fill = fill
+    cell.font = font
+    return r
+
+
+def _write_day_block(ws, day, rows_for_day):
+    date_idx = HEADERS.index("Дата отзыва")
+    store_idx = HEADERS.index("Стор")
+    neg_idx = HEADERS.index("Негативный")
+
+    label = day.strftime("%d.%m.%Y") if day else "Без даты"
+    _merged_banner_row(ws, label, DATE_BLOCK_FILL, DATE_BLOCK_FONT)
+
+    by_store = {}
+    for row in rows_for_day:
+        by_store.setdefault(row[store_idx], []).append(row)
+
+    for store in STORE_ORDER:
+        store_rows = by_store.pop(store, None)
+        if not store_rows:
+            continue
+        store_rows.sort(key=lambda r: r[date_idx] or datetime.min, reverse=True)
+        _merged_banner_row(ws, f"  {store}", STORE_BLOCK_FILL, STORE_BLOCK_FONT)
+        for row in store_rows:
+            ws.append(row)
+            if row[neg_idx] == "да":
+                last_row = ws.max_row
+                for col in range(1, len(HEADERS) + 1):
+                    ws.cell(row=last_row, column=col).fill = NEGATIVE_FILL
+
+    # На случай сторов вне STORE_ORDER (не должно происходить, но не теряем данные).
+    for store, store_rows in by_store.items():
+        _merged_banner_row(ws, f"  {store}", STORE_BLOCK_FILL, STORE_BLOCK_FONT)
+        for row in store_rows:
+            ws.append(row)
+
+
+def write_grouped_rows(ws, rows):
+    """Полностью перезаписывает данные листа (кроме шапки) блоками:
+    один блок — один календарный день, внутри — отдельно App Store и
+    Google Play. Блок «последние 5 дней» идёт первым, дальше архив."""
     date_idx = HEADERS.index("Дата отзыва")
     rows.sort(key=lambda r: r[date_idx] or datetime.min, reverse=True)
 
+    for merged_range in list(ws.merged_cells.ranges):
+        ws.unmerge_cells(str(merged_range))
     if ws.max_row > 1:
         ws.delete_rows(2, ws.max_row - 1)
 
-    for row in rows:
-        ws.append(row)
-        if row[HEADERS.index("Негативный")] == "да":
-            last_row = ws.max_row
-            for col in range(1, len(HEADERS) + 1):
-                ws.cell(row=last_row, column=col).fill = NEGATIVE_FILL
+    days = []
+    for day, day_rows in groupby(rows, key=lambda r: r[date_idx].date() if hasattr(r[date_idx], "date") else None):
+        days.append((day, list(day_rows)))
+
+    recent_days, archive_days = days[:RECENT_DAYS], days[RECENT_DAYS:]
+
+    if recent_days:
+        _merged_banner_row(ws, f"ПОСЛЕДНИЕ {len(recent_days)} ДН." if len(recent_days) != 5 else "ПОСЛЕДНИЕ 5 ДНЕЙ", SECTION_FILL, SECTION_FONT)
+        for day, day_rows in recent_days:
+            _write_day_block(ws, day, day_rows)
+
+    if archive_days:
+        _merged_banner_row(ws, "АРХИВ", ARCHIVE_FILL, SECTION_FONT)
+        for day, day_rows in archive_days:
+            _write_day_block(ws, day, day_rows)
 
 
 def notify_negative(count):
@@ -234,7 +301,11 @@ def main():
     wb, ws = load_or_create_workbook()
     seen_app_ids, seen_gp_hashes = load_seen_ids(ws)
 
-    all_rows = [list(row) for row in ws.iter_rows(min_row=2, values_only=True) if row and row[0] is not None]
+    store_idx = HEADERS.index("Стор")
+    all_rows = [
+        list(row) for row in ws.iter_rows(min_row=2, values_only=True)
+        if row and row[store_idx] in ("App Store", "Google Play")
+    ]
 
     new_total = 0
     new_negative = 0
@@ -263,7 +334,7 @@ def main():
         except Exception:
             logging.exception("Google Play %s: сбор не удался", country)
 
-    write_sorted_rows(ws, all_rows)
+    write_grouped_rows(ws, all_rows)
     wb.save(OUTPUT_FILE)
     logging.info("Готово. Новых отзывов: %s, из них негативных: %s", new_total, new_negative)
 
