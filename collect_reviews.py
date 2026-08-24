@@ -88,13 +88,14 @@ def _label(value, default=""):
     return value
 
 
-def fetch_app_store_reviews(country, seen_ids, limit=REVIEW_LIMIT):
-    """Берёт top-`limit` самых свежих отзывов сторфронта (сортировка
-    mostRecent) и оставляет только те, что ещё не сохранены. Окно всегда
-    строго top-`limit` — скрипт не «уезжает» вглубь истории на повторных
-    запусках, даже если часть окна уже была сохранена раньше."""
+def fetch_app_store_reviews(country, seen_ids, limit=REVIEW_LIMIT, cutoff_date=None):
+    """Без `cutoff_date`: берёт top-`limit` самых свежих отзывов (обычный
+    ежедневный режим). С `cutoff_date`: игнорирует `limit` и листает все
+    доступные страницы (Apple отдаёт максимум 10 × 50 = 500 отзывов),
+    оставляя только отзывы не старше `cutoff_date` — режим для разовой
+    догрузки истории на глубину N дней."""
     raw_entries = []
-    for page in range(1, 11):  # Apple отдаёт максимум 10 страниц по 50 отзывов
+    for page in range(1, 11):
         url = (
             f"https://itunes.apple.com/{country}/rss/customerreviews/"
             f"id={APP_STORE_ID}/sortBy=mostRecent/page={page}/json"
@@ -112,12 +113,14 @@ def fetch_app_store_reviews(country, seen_ids, limit=REVIEW_LIMIT):
         if not reviews_on_page:
             break
         raw_entries.extend(reviews_on_page)
-        if len(raw_entries) >= limit:
+        if cutoff_date is None and len(raw_entries) >= limit:
             break
         time.sleep(0.1)
 
+    candidates = raw_entries if cutoff_date is not None else raw_entries[:limit]
+
     results = []
-    for e in raw_entries[:limit]:
+    for e in candidates:
         try:
             rid = _label(e.get("id"))
             if not rid or rid in seen_ids:
@@ -127,6 +130,8 @@ def fetch_app_store_reviews(country, seen_ids, limit=REVIEW_LIMIT):
                 dt = dt.astimezone(timezone.utc).replace(tzinfo=None)
             except Exception:
                 dt = None
+            if cutoff_date is not None and dt is not None and dt < cutoff_date:
+                continue
             rating_raw = _label(e.get("im:rating"))
             author_field = e.get("author")
             author = _label(author_field.get("name")) if isinstance(author_field, dict) else _label(author_field)
@@ -145,35 +150,51 @@ def fetch_app_store_reviews(country, seen_ids, limit=REVIEW_LIMIT):
     return results
 
 
-def fetch_google_play_reviews(country, seen_hashes, limit=REVIEW_LIMIT):
-    """Забирает последние `limit` отзывов Google Play (сортировка по новизне)
-    и оставляет только те, что ещё не сохранены."""
+def fetch_google_play_reviews(country, seen_hashes, limit=REVIEW_LIMIT, cutoff_date=None):
+    """Без `cutoff_date`: забирает последние `limit` отзывов (обычный
+    ежедневный режим, один запрос). С `cutoff_date`: постранично листает
+    (сортировка по новизне), пока не выйдет за дату или не кончится
+    история — режим для разовой догрузки истории на глубину N дней."""
     results = []
     try:
-        batch, _ = gp_reviews(
-            GOOGLE_PLAY_ID,
-            lang="ru",
-            country=country,
-            sort=Sort.NEWEST,
-            count=limit,
-        )
-        for r in batch:
-            author = r.get("userName", "") or ""
-            text = r.get("content", "") or ""
-            at = r.get("at")
-            h = hash_review(author, at, text)
-            if h in seen_hashes:
-                continue
-            results.append({
-                "id": h,
-                "date": at,
-                "rating": r.get("score"),
-                "title": "",
-                "text": text,
-                "author": author,
-                "version": r.get("reviewCreatedVersion", "") or "",
-                "country": country,
-            })
+        if cutoff_date is None:
+            batches = [gp_reviews(GOOGLE_PLAY_ID, lang="ru", country=country, sort=Sort.NEWEST, count=limit)[0]]
+        else:
+            batches = []
+            continuation_token = None
+            while True:
+                batch, continuation_token = gp_reviews(
+                    GOOGLE_PLAY_ID, lang="ru", country=country,
+                    sort=Sort.NEWEST, count=200, continuation_token=continuation_token,
+                )
+                if not batch:
+                    break
+                batches.append(batch)
+                oldest_at = batch[-1].get("at")
+                if continuation_token is None or (oldest_at and oldest_at < cutoff_date):
+                    break
+                time.sleep(0.1)
+
+        for batch in batches:
+            for r in batch:
+                author = r.get("userName", "") or ""
+                text = r.get("content", "") or ""
+                at = r.get("at")
+                if cutoff_date is not None and at is not None and at < cutoff_date:
+                    continue
+                h = hash_review(author, at, text)
+                if h in seen_hashes:
+                    continue
+                results.append({
+                    "id": h,
+                    "date": at,
+                    "rating": r.get("score"),
+                    "title": "",
+                    "text": text,
+                    "author": author,
+                    "version": r.get("reviewCreatedVersion", "") or "",
+                    "country": country,
+                })
     except Exception as e:
         logging.warning("Google Play %s: %s", country, e)
     return results
@@ -357,6 +378,19 @@ def notify_negative(count):
 
 
 def main():
+    import argparse
+    from datetime import timedelta
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--days", type=int, default=None,
+        help="Разовая догрузка истории на глубину N дней от текущей даты "
+             "(вместо обычного топ-%d за запуск). Дополняет текущий файл, "
+             "ничего не удаляет." % REVIEW_LIMIT,
+    )
+    args = parser.parse_args()
+    cutoff_date = (datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=args.days)) if args.days else None
+
     wb, ws = load_or_create_workbook()
     android_rows, apple_rows = load_existing(ws)
     seen_gp_hashes = {str(r[ID_IDX]) for r in android_rows}
@@ -367,7 +401,7 @@ def main():
 
     for country in COUNTRIES:
         try:
-            for item in fetch_app_store_reviews(country, seen_app_ids):
+            for item in fetch_app_store_reviews(country, seen_app_ids, cutoff_date=cutoff_date):
                 seen_app_ids.add(item["id"])
                 new_total += 1
                 row, is_negative = build_row(item)
@@ -379,7 +413,7 @@ def main():
 
     for country in COUNTRIES:
         try:
-            for item in fetch_google_play_reviews(country, seen_gp_hashes):
+            for item in fetch_google_play_reviews(country, seen_gp_hashes, cutoff_date=cutoff_date):
                 seen_gp_hashes.add(item["id"])
                 new_total += 1
                 row, is_negative = build_row(item)
