@@ -24,7 +24,8 @@ from pathlib import Path
 import requests
 from google_play_scraper import Sort, reviews as gp_reviews
 from openpyxl import Workbook, load_workbook
-from openpyxl.styles import Font, PatternFill
+from openpyxl.styles import Alignment, Font, PatternFill
+from openpyxl.utils import get_column_letter
 
 BASE_DIR = Path(__file__).resolve().parent
 OUTPUT_FILE = BASE_DIR / "otzyvy_halyk.xlsx"
@@ -207,6 +208,15 @@ def fetch_google_play_reviews(country, seen_hashes, limit=REVIEW_LIMIT, cutoff_d
 PLATFORM_HEADER_FILL = PatternFill(start_color="C6D9F1", end_color="C6D9F1", fill_type="solid")
 PLATFORM_HEADER_FONT = Font(bold=True, size=13)
 
+TEXT_IDX = FIELDS.index("Текст отзыва")
+TEXT_COLUMN_WIDTH = 40
+WRAP_ALIGNMENT = Alignment(wrap_text=True, vertical="top")
+
+
+def set_column_widths(ws):
+    ws.column_dimensions[get_column_letter(LEFT_COL + TEXT_IDX)].width = TEXT_COLUMN_WIDTH
+    ws.column_dimensions[get_column_letter(RIGHT_COL + TEXT_IDX)].width = TEXT_COLUMN_WIDTH
+
 
 def setup_headers(ws):
     ws.append([None] * TOTAL_COLS)
@@ -223,6 +233,8 @@ def setup_headers(ws):
     for j, name in enumerate(FIELDS):
         ws.cell(row=2, column=LEFT_COL + j, value=name).font = Font(bold=True)
         ws.cell(row=2, column=RIGHT_COL + j, value=name).font = Font(bold=True)
+
+    set_column_widths(ws)
 
 
 def load_or_create_workbook():
@@ -326,6 +338,8 @@ def _write_day_block(ws, day, android_day_rows, apple_day_rows):
             row_values[RIGHT_COL - 1:RIGHT_COL - 1 + len(FIELDS)] = i_row
         ws.append(row_values)
         r = ws.max_row
+        ws.cell(row=r, column=LEFT_COL + TEXT_IDX).alignment = WRAP_ALIGNMENT
+        ws.cell(row=r, column=RIGHT_COL + TEXT_IDX).alignment = WRAP_ALIGNMENT
         if a_row is not None and a_row[NEG_IDX] == "да":
             for col in range(LEFT_COL, LEFT_COL + len(FIELDS)):
                 ws.cell(row=r, column=col).fill = NEGATIVE_FILL
@@ -343,6 +357,7 @@ def write_side_by_side(ws, android_rows, apple_rows):
         ws.unmerge_cells(str(merged_range))
     if ws.max_row > 2:
         ws.delete_rows(3, ws.max_row - 2)
+    set_column_widths(ws)
 
     android_by_day = _group_by_day(android_rows)
     apple_by_day = _group_by_day(apple_rows)
