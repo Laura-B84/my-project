@@ -301,9 +301,6 @@ SECTION_FILL = PatternFill(start_color="FFE699", end_color="FFE699", fill_type="
 SECTION_FONT = Font(bold=True, size=13)
 ARCHIVE_FILL = PatternFill(start_color="E2EFDA", end_color="E2EFDA", fill_type="solid")
 
-RECENT_DAYS = 5
-
-
 def _merged_banner_row(ws, text, fill, font):
     ws.append([None] * TOTAL_COLS)
     r = ws.max_row
@@ -348,17 +345,7 @@ def _write_day_block(ws, day, android_day_rows, apple_day_rows):
                 ws.cell(row=r, column=col).fill = NEGATIVE_FILL
 
 
-def write_side_by_side(ws, android_rows, apple_rows):
-    """Полностью перезаписывает данные листа (кроме шапки в строках 1-2):
-    Android слева, Apple справа, строки внутри дня выровнены по индексу,
-    при расхождении в количестве — пустые ячейки. Один блок — один день,
-    «последние 5 дней» — первым, дальше архив."""
-    for merged_range in list(ws.merged_cells.ranges):
-        ws.unmerge_cells(str(merged_range))
-    if ws.max_row > 2:
-        ws.delete_rows(3, ws.max_row - 2)
-    set_column_widths(ws)
-
+def _write_section(ws, android_rows, apple_rows):
     android_by_day = _group_by_day(android_rows)
     apple_by_day = _group_by_day(apple_rows)
     all_days = sorted(
@@ -366,20 +353,30 @@ def write_side_by_side(ws, android_rows, apple_rows):
         key=lambda d: d or datetime.min.date(),
         reverse=True,
     )
-    recent_days, archive_days = all_days[:RECENT_DAYS], all_days[RECENT_DAYS:]
+    for day in all_days:
+        _write_day_block(ws, day, android_by_day.get(day, []), apple_by_day.get(day, []))
 
-    def write_days(days):
-        for day in days:
-            _write_day_block(ws, day, android_by_day.get(day, []), apple_by_day.get(day, []))
 
-    if recent_days:
-        label = "ПОСЛЕДНИЕ 5 ДНЕЙ" if len(recent_days) == 5 else f"ПОСЛЕДНИЕ {len(recent_days)} ДН."
-        _merged_banner_row(ws, label, SECTION_FILL, SECTION_FONT)
-        write_days(recent_days)
+def write_side_by_side(ws, existing_android, existing_apple, new_android, new_apple):
+    """Полностью перезаписывает данные листа (кроме шапки в строках 1-2):
+    Android слева, Apple справа, строки внутри дня выровнены по индексу,
+    при расхождении в количестве — пустые ячейки. Сверху — секция «НОВЫЕ»
+    (добавлено в этом запуске, ещё не рассылалось), ниже — «АРХИВ» (уже
+    было в файле и уже отправлялось раньше)."""
+    for merged_range in list(ws.merged_cells.ranges):
+        ws.unmerge_cells(str(merged_range))
+    if ws.max_row > 2:
+        ws.delete_rows(3, ws.max_row - 2)
+    set_column_widths(ws)
 
-    if archive_days:
-        _merged_banner_row(ws, "АРХИВ", ARCHIVE_FILL, SECTION_FONT)
-        write_days(archive_days)
+    new_count = len(new_android) + len(new_apple)
+    if new_count:
+        _merged_banner_row(ws, f"НОВЫЕ С ПОСЛЕДНЕЙ ОТПРАВКИ ({new_count})", SECTION_FILL, SECTION_FONT)
+        _write_section(ws, new_android, new_apple)
+
+    if existing_android or existing_apple:
+        _merged_banner_row(ws, "АРХИВ (уже отправлялось ранее)", ARCHIVE_FILL, SECTION_FONT)
+        _write_section(ws, existing_android, existing_apple)
 
 
 def notify_negative(count):
@@ -411,10 +408,12 @@ def main():
     cutoff_date = (datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=args.days)) if args.days else None
 
     wb, ws = load_or_create_workbook()
-    android_rows, apple_rows = load_existing(ws)
-    seen_gp_hashes = {str(r[ID_IDX]) for r in android_rows}
-    seen_app_ids = {str(r[ID_IDX]) for r in apple_rows}
+    # То, что уже было в файле до этого запуска, уже ушло в прошлой рассылке.
+    existing_android, existing_apple = load_existing(ws)
+    seen_gp_hashes = {str(r[ID_IDX]) for r in existing_android}
+    seen_app_ids = {str(r[ID_IDX]) for r in existing_apple}
 
+    new_android, new_apple = [], []
     new_total = 0
     new_negative = 0
 
@@ -424,7 +423,7 @@ def main():
                 seen_app_ids.add(item["id"])
                 new_total += 1
                 row, is_negative = build_row(item)
-                apple_rows.append(row)
+                new_apple.append(row)
                 if is_negative:
                     new_negative += 1
         except Exception:
@@ -436,17 +435,19 @@ def main():
                 seen_gp_hashes.add(item["id"])
                 new_total += 1
                 row, is_negative = build_row(item)
-                android_rows.append(row)
+                new_android.append(row)
                 if is_negative:
                     new_negative += 1
         except Exception:
             logging.exception("Google Play %s: сбор не удался", country)
 
     retention_cutoff = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=RETENTION_DAYS)
-    before = len(android_rows) + len(apple_rows)
-    android_rows = [r for r in android_rows if r[DATE_IDX] is None or r[DATE_IDX] >= retention_cutoff]
-    apple_rows = [r for r in apple_rows if r[DATE_IDX] is None or r[DATE_IDX] >= retention_cutoff]
-    removed = before - len(android_rows) - len(apple_rows)
+    before = len(existing_android) + len(existing_apple) + len(new_android) + len(new_apple)
+    existing_android = [r for r in existing_android if r[DATE_IDX] is None or r[DATE_IDX] >= retention_cutoff]
+    existing_apple = [r for r in existing_apple if r[DATE_IDX] is None or r[DATE_IDX] >= retention_cutoff]
+    new_android = [r for r in new_android if r[DATE_IDX] is None or r[DATE_IDX] >= retention_cutoff]
+    new_apple = [r for r in new_apple if r[DATE_IDX] is None or r[DATE_IDX] >= retention_cutoff]
+    removed = before - len(existing_android) - len(existing_apple) - len(new_android) - len(new_apple)
 
     if not is_new_layout(ws):
         for merged_range in list(ws.merged_cells.ranges):
@@ -454,7 +455,7 @@ def main():
         ws.delete_rows(1, ws.max_row)
         setup_headers(ws)
 
-    write_side_by_side(ws, android_rows, apple_rows)
+    write_side_by_side(ws, existing_android, existing_apple, new_android, new_apple)
     wb.save(OUTPUT_FILE)
     logging.info(
         "Готово. Новых отзывов: %s, из них негативных: %s. Удалено старше %s дней: %s",
