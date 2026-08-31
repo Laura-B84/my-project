@@ -3,7 +3,12 @@ name: Collect reviews
 on:
   schedule:
     - cron: "0 3 * * 1-5"  # 08:00 Asia/Almaty (UTC+5), только по будням (Пн-Пт)
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      force_email:
+        description: "Прислать письмо с вложением, даже если новых отзывов нет"
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -41,7 +46,7 @@ jobs:
           fi
 
       - name: Send update email (есть новые отзывы)
-        if: steps.collect.outputs.new_total != '0'
+        if: steps.collect.outputs.new_total != '0' || github.event.inputs.force_email == 'true'
         uses: dawidd6/action-send-mail@v3
         with:
           server_address: smtp.gmail.com
@@ -61,7 +66,7 @@ jobs:
           attachments: otzyvy_halyk.xlsx
 
       - name: Send update email (новых отзывов нет)
-        if: steps.collect.outputs.new_total == '0'
+        if: steps.collect.outputs.new_total == '0' && github.event.inputs.force_email != 'true'
         uses: dawidd6/action-send-mail@v3
         with:
           server_address: smtp.gmail.com
