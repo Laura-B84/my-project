@@ -67,6 +67,12 @@ COUNTRIES = ["kz"]
 # последние N отзывов по каждому источнику при первом запуске.
 REVIEW_LIMIT = 30
 
+# Обычные запуски теперь идут только по будням (см. workflow) — после
+# выходных между пятницей и понедельником проходит до 3 дней. Берём
+# отзывы по дате (не по фиксированному количеству), с запасом на случай
+# длинных выходных/праздников, чтобы ничего не потерялось.
+DAILY_LOOKBACK_DAYS = 4
+
 # Хранить в файле только отзывы за последние N дней — более старые
 # записи удаляются при каждом запуске.
 RETENTION_DAYS = 30
@@ -405,7 +411,8 @@ def main():
              "ничего не удаляет." % REVIEW_LIMIT,
     )
     args = parser.parse_args()
-    cutoff_date = (datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=args.days)) if args.days else None
+    lookback_days = args.days if args.days else DAILY_LOOKBACK_DAYS
+    cutoff_date = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=lookback_days)
 
     wb, ws = load_or_create_workbook()
     # То, что уже было в файле до этого запуска, уже ушло в прошлой рассылке.

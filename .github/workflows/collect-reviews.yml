@@ -2,7 +2,7 @@ name: Collect reviews
 
 on:
   schedule:
-    - cron: "0 4 * * *"  # 09:00 Asia/Almaty (UTC+5), не зависит от компьютера пользователя
+    - cron: "0 3 * * 1-5"  # 08:00 Asia/Almaty (UTC+5), только по будням (Пн-Пт)
   workflow_dispatch: {}
 
 permissions:
@@ -40,7 +40,8 @@ jobs:
             git push
           fi
 
-      - name: Send update email
+      - name: Send update email (есть новые отзывы)
+        if: steps.collect.outputs.new_total != '0'
         uses: dawidd6/action-send-mail@v3
         with:
           server_address: smtp.gmail.com
@@ -58,3 +59,16 @@ jobs:
 
             Полная таблица — во вложении.
           attachments: otzyvy_halyk.xlsx
+
+      - name: Send update email (новых отзывов нет)
+        if: steps.collect.outputs.new_total == '0'
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: smtp.gmail.com
+          server_port: 465
+          username: ${{ secrets.MAIL_USERNAME }}
+          password: ${{ secrets.MAIL_PASSWORD }}
+          from: Halyk Отзывы <${{ secrets.MAIL_USERNAME }}>
+          to: maksimm3@halykbank.kz
+          subject: "Halyk отзывы — новых нет"
+          body: "Новых отзывов за сегодня не было."
