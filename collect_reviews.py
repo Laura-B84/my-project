@@ -48,6 +48,7 @@ NEG_IDX = FIELDS.index("Негативный")
 # дня выровнены по индексу — где данных с одной стороны не хватает,
 # остаются пустые ячейки.
 LEFT_COL = 1
+GAP_COL = LEFT_COL + len(FIELDS)
 RIGHT_COL = LEFT_COL + len(FIELDS) + 1
 TOTAL_COLS = RIGHT_COL + len(FIELDS) - 1
 
@@ -214,33 +215,92 @@ def fetch_google_play_reviews(country, seen_hashes, limit=REVIEW_LIMIT, cutoff_d
 PLATFORM_HEADER_FILL = PatternFill(start_color="C6D9F1", end_color="C6D9F1", fill_type="solid")
 PLATFORM_HEADER_FONT = Font(bold=True, size=13)
 
+DATE_IDX_F = FIELDS.index("Дата отзыва")
+TITLE_IDX = FIELDS.index("Заголовок отзыва")
 TEXT_IDX = FIELDS.index("Текст отзыва")
+AUTHOR_IDX = FIELDS.index("Автор")
+
+DATE_COLUMN_WIDTH = 22
 TEXT_COLUMN_WIDTH = 40
-WRAP_ALIGNMENT = Alignment(wrap_text=True, vertical="top")
+AUTHOR_COLUMN_WIDTH = 15
+
+# Колонка с заголовком отзыва только на стороне Apple (N) — с переносом.
+WRAP_TITLE_COL = RIGHT_COL + TITLE_IDX
+
+TEXT_ALIGNMENT = Alignment(wrap_text=True, vertical="top")  # E, O — как есть, без центрирования
+AUTHOR_ALIGNMENT = Alignment(horizontal="left", vertical="center", wrap_text=True)  # F, P
+CENTER_ALIGNMENT = Alignment(horizontal="center", vertical="center")
+CENTER_WRAP_ALIGNMENT = Alignment(horizontal="center", vertical="center", wrap_text=True)
+HEADER_ALIGNMENT = Alignment(horizontal="center", vertical="center", wrap_text=True)
+
+# Обратная совместимость: старое имя, использовавшееся для E/O.
+WRAP_ALIGNMENT = TEXT_ALIGNMENT
+
+
+def data_cell_alignment(col):
+    """Возвращает нужное выравнивание для колонки данных по её роли."""
+    if col == LEFT_COL + TEXT_IDX or col == RIGHT_COL + TEXT_IDX:
+        return TEXT_ALIGNMENT
+    if col == LEFT_COL + AUTHOR_IDX or col == RIGHT_COL + AUTHOR_IDX:
+        return AUTHOR_ALIGNMENT
+    if col == WRAP_TITLE_COL:
+        return CENTER_WRAP_ALIGNMENT
+    return CENTER_ALIGNMENT
 
 
 def set_column_widths(ws):
-    ws.column_dimensions[get_column_letter(LEFT_COL + TEXT_IDX)].width = TEXT_COLUMN_WIDTH
-    ws.column_dimensions[get_column_letter(RIGHT_COL + TEXT_IDX)].width = TEXT_COLUMN_WIDTH
+    for base in (LEFT_COL, RIGHT_COL):
+        ws.column_dimensions[get_column_letter(base + DATE_IDX_F)].width = DATE_COLUMN_WIDTH
+        ws.column_dimensions[get_column_letter(base + TEXT_IDX)].width = TEXT_COLUMN_WIDTH
+        ws.column_dimensions[get_column_letter(base + AUTHOR_IDX)].width = AUTHOR_COLUMN_WIDTH
 
 
-def setup_headers(ws):
-    ws.append([None] * TOTAL_COLS)
-    ws.cell(row=1, column=LEFT_COL, value="Google Play (Android)")
-    ws.merge_cells(start_row=1, start_column=LEFT_COL, end_row=1, end_column=LEFT_COL + len(FIELDS) - 1)
-    ws.cell(row=1, column=RIGHT_COL, value="App Store (iOS)")
-    ws.merge_cells(start_row=1, start_column=RIGHT_COL, end_row=1, end_column=RIGHT_COL + len(FIELDS) - 1)
+def ensure_header_merges(ws):
+    """Чинит объединение ячеек в строке 1 (баннер платформы), если его
+    когда-то случайно сняли — идемпотентно, не трогает остальное."""
+    existing = {str(r) for r in ws.merged_cells.ranges}
+    left_range = f"{get_column_letter(LEFT_COL)}1:{get_column_letter(LEFT_COL + len(FIELDS) - 1)}1"
+    right_range = f"{get_column_letter(RIGHT_COL)}1:{get_column_letter(RIGHT_COL + len(FIELDS) - 1)}1"
+    if left_range not in existing:
+        ws.merge_cells(left_range)
+    if right_range not in existing:
+        ws.merge_cells(right_range)
+
+
+def style_header_cells(ws):
+    """Обновляет шрифт/заливку/выравнивание шапки (строки 1-2), не трогая
+    объединение ячеек. Вызывается на каждом запуске, чтобы формат шапки
+    не «съезжал», даже если сама шапка была создана более ранней версией
+    скрипта."""
     for col in (LEFT_COL, RIGHT_COL):
         cell = ws.cell(row=1, column=col)
         cell.font = PLATFORM_HEADER_FONT
         cell.fill = PLATFORM_HEADER_FILL
 
-    ws.append([None] * TOTAL_COLS)
-    for j, name in enumerate(FIELDS):
-        ws.cell(row=2, column=LEFT_COL + j, value=name).font = Font(bold=True)
-        ws.cell(row=2, column=RIGHT_COL + j, value=name).font = Font(bold=True)
+    for j in range(len(FIELDS)):
+        for base in (LEFT_COL, RIGHT_COL):
+            cell = ws.cell(row=2, column=base + j)
+            cell.font = Font(bold=True)
+            cell.alignment = HEADER_ALIGNMENT
 
     set_column_widths(ws)
+
+
+def setup_headers(ws):
+    """Создаёт строки 1-2 (значения + объединение ячеек) для нового файла
+    или при миграции со старого формата листа."""
+    ws.append([None] * TOTAL_COLS)
+    ws.cell(row=1, column=LEFT_COL, value="Google Play (Android)")
+    ws.merge_cells(start_row=1, start_column=LEFT_COL, end_row=1, end_column=LEFT_COL + len(FIELDS) - 1)
+    ws.cell(row=1, column=RIGHT_COL, value="App Store (iOS)")
+    ws.merge_cells(start_row=1, start_column=RIGHT_COL, end_row=1, end_column=RIGHT_COL + len(FIELDS) - 1)
+
+    ws.append([None] * TOTAL_COLS)
+    for j, name in enumerate(FIELDS):
+        ws.cell(row=2, column=LEFT_COL + j, value=name)
+        ws.cell(row=2, column=RIGHT_COL + j, value=name)
+
+    style_header_cells(ws)
 
 
 def load_or_create_workbook():
@@ -341,8 +401,10 @@ def _write_day_block(ws, day, android_day_rows, apple_day_rows):
             row_values[RIGHT_COL - 1:RIGHT_COL - 1 + len(FIELDS)] = i_row
         ws.append(row_values)
         r = ws.max_row
-        ws.cell(row=r, column=LEFT_COL + TEXT_IDX).alignment = WRAP_ALIGNMENT
-        ws.cell(row=r, column=RIGHT_COL + TEXT_IDX).alignment = WRAP_ALIGNMENT
+        for col in range(1, TOTAL_COLS + 1):
+            if col == GAP_COL:
+                continue
+            ws.cell(row=r, column=col).alignment = data_cell_alignment(col)
         if a_row is not None and a_row[NEG_IDX] == "да":
             for col in range(LEFT_COL, LEFT_COL + len(FIELDS)):
                 ws.cell(row=r, column=col).fill = NEGATIVE_FILL
@@ -370,10 +432,12 @@ def write_side_by_side(ws, existing_android, existing_apple, new_android, new_ap
     (добавлено в этом запуске, ещё не рассылалось), ниже — «АРХИВ» (уже
     было в файле и уже отправлялось раньше)."""
     for merged_range in list(ws.merged_cells.ranges):
-        ws.unmerge_cells(str(merged_range))
+        if merged_range.min_row >= 3:  # не трогаем объединения в шапке (строки 1-2)
+            ws.unmerge_cells(str(merged_range))
     if ws.max_row > 2:
         ws.delete_rows(3, ws.max_row - 2)
-    set_column_widths(ws)
+    ensure_header_merges(ws)
+    style_header_cells(ws)
 
     new_count = len(new_android) + len(new_apple)
     if new_count:
