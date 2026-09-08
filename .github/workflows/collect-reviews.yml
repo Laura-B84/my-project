@@ -2,7 +2,7 @@ name: Collect reviews
 
 on:
   schedule:
-    - cron: "0 3 * * 1-5"  # 08:00 Asia/Almaty (UTC+5), только по будням (Пн-Пт)
+    - cron: "7 3 * * 1-5"  # 08:07 Asia/Almaty (UTC+5), только по будням (Пн-Пт) — смещено с :00, чтобы реже попадать в пиковую нагрузку GitHub Actions
   workflow_dispatch:
     inputs:
       force_email:
