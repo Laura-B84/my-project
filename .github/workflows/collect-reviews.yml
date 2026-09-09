@@ -1,10 +1,14 @@
 name: Collect reviews
 
 on:
-  # Встроенный GitHub Actions `schedule` был ненадёжен (опаздывал на часы,
-  # т.к. точное время cron не гарантируется). Основной механизм запуска —
-  # внешний cron-планировщик (Claude Code routine), который каждый будний
-  # день в 8:07 Asia/Almaty дёргает workflow_dispatch. См. prd.md.
+  # Пробовали заменить на внешний триггер (Claude Code routine), но у
+  # облачной среды routine нет прав Actions:write на GitHub (403 Resource
+  # not accessible by integration) — она физически не может дёрнуть
+  # workflow_dispatch. Встроенный schedule опаздывает (время не
+  # гарантировано), но исполняется гарантированно, поэтому остаётся
+  # основным механизмом. См. prd.md.
+  schedule:
+    - cron: "7 3 * * 1-5"  # 08:07 Asia/Almaty (UTC+5), только по будням (Пн-Пт)
   workflow_dispatch:
     inputs:
       force_email:
