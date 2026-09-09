@@ -1,8 +1,10 @@
 name: Collect reviews
 
 on:
-  schedule:
-    - cron: "7 3 * * 1-5"  # 08:07 Asia/Almaty (UTC+5), только по будням (Пн-Пт) — смещено с :00, чтобы реже попадать в пиковую нагрузку GitHub Actions
+  # Встроенный GitHub Actions `schedule` был ненадёжен (опаздывал на часы,
+  # т.к. точное время cron не гарантируется). Основной механизм запуска —
+  # внешний cron-планировщик (Claude Code routine), который каждый будний
+  # день в 8:07 Asia/Almaty дёргает workflow_dispatch. См. prd.md.
   workflow_dispatch:
     inputs:
       force_email:
