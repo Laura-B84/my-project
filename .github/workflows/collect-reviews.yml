@@ -8,7 +8,7 @@ on:
   # гарантировано), но исполняется гарантированно, поэтому остаётся
   # основным механизмом. См. prd.md.
   schedule:
-    - cron: "7 3 * * 1-5"  # 08:07 Asia/Almaty (UTC+5), только по будням (Пн-Пт)
+    - cron: "17 0 * * 1-5"  # 05:17 Asia/Almaty (Astana, UTC+5), только по будням (Пн-Пт)
   workflow_dispatch:
     inputs:
       force_email:
