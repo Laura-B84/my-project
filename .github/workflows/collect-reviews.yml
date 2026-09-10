@@ -1,14 +1,15 @@
 name: Collect reviews
 
 on:
-  # Пробовали заменить на внешний триггер (Claude Code routine), но у
-  # облачной среды routine нет прав Actions:write на GitHub (403 Resource
-  # not accessible by integration) — она физически не может дёрнуть
-  # workflow_dispatch. Встроенный schedule опаздывает (время не
-  # гарантировано), но исполняется гарантированно, поэтому остаётся
-  # основным механизмом. См. prd.md.
-  schedule:
-    - cron: "17 0 * * 1-5"  # 05:17 Asia/Almaty (Astana, UTC+5), только по будням (Пн-Пт)
+  # Основной автозапуск — внешний cron-пингер (cron-job.org), который точно
+  # по времени бьёт в GitHub API repository_dispatch. Встроенный GitHub
+  # Actions `schedule` для этого не годится (время не гарантировано,
+  # опаздывал на часы), а облачная Claude Code routine физически не может
+  # дёрнуть workflow (403 на Actions:write) — обе попытки задокументированы
+  # в prd.md. `repository_dispatch` не требует прав Actions:write, только
+  # Contents: write на репозиторий.
+  repository_dispatch:
+    types: [collect-reviews-cron]
   workflow_dispatch:
     inputs:
       force_email:
