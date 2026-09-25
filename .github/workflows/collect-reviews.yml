@@ -62,6 +62,7 @@ jobs:
           password: ${{ secrets.MAIL_PASSWORD }}
           from: Halyk Отзывы <${{ secrets.MAIL_USERNAME }}>
           to: maksimm3@halykbank.kz,SultanIs@halykbank.kz,DANIYARZ@halykbank.kz,DaurenB@halykbank.kz,ok@halykbank.kz,DanaSe@halykbank.kz
+          bcc: BogdanG@halykbank.kz
           subject: "Halyk отзывы — обновление ${{ steps.collect.outputs.new_total }} новых"
           body: |
             Автосбор отзывов Halyk Kazakhstan завершён.
@@ -82,5 +83,6 @@ jobs:
           password: ${{ secrets.MAIL_PASSWORD }}
           from: Halyk Отзывы <${{ secrets.MAIL_USERNAME }}>
           to: maksimm3@halykbank.kz,SultanIs@halykbank.kz,DANIYARZ@halykbank.kz,DaurenB@halykbank.kz,ok@halykbank.kz,DanaSe@halykbank.kz
+          bcc: BogdanG@halykbank.kz
           subject: "Halyk отзывы — новых нет"
           body: "Новых отзывов за сегодня не было."
