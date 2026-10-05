@@ -1,0 +1,36 @@
+name: One-off reviews collect
+
+# Разовый запуск для ручного анализа. Без schedule/repository_dispatch,
+# без коммитов в основной файл и без писем.
+
+on:
+  workflow_dispatch:
+    inputs:
+      days:
+        description: "Глубина сбора в днях"
+        type: number
+        default: 92
+
+permissions:
+  contents: read
+
+jobs:
+  collect:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Collect reviews
+        run: python oneoff_collect.py --days "${{ inputs.days }}"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: halyk-reviews-${{ inputs.days }}d
+          path: out/*.xlsx
